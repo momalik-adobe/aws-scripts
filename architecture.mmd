@@ -1,0 +1,26 @@
+graph TD
+  A["IoT Devices"] --> B["AWS IoT Core"]
+  B --> C["IoT Rule (Real-time → Lambda)"]
+  B --> D["IoT Rule (Raw → Firehose)"]
+
+  C --> E["Lambda Enrich (ENRICH_FN)\nadds: powerFactor, utilization, receivedAt"]
+  E -. "Read thresholds" .-> G["DynamoDB Device Registry (DDB_REG)\nGSI: PlantDevicesIndex"]
+  E --> F["Kinesis Data Streams"]
+
+  F --> H["Lambda Consumer (CONSUMER_FN)"]
+  H --> I["DynamoDB Hot Timeseries (DDB_HOT)\nPK: plantMachineId, SK: timestamp\nGSIs: PlantBucketTimestampIndex, PlantTimestampIndex\nTTL: 48h"]
+
+  I --> J["DynamoDB Streams"]
+  J --> K["Lambda Latest Updater (LATEST_FN)"]
+  K --> L["DynamoDB Latest (DDB_LATEST)\nGSI: PlantIndex (plantId, machineId)"]
+
+  D --> M["Kinesis Data Firehose\nbuffer: 128MB / 300s, GZIP"]
+  M --> N["S3 RAW Bucket\nraw-data/year=…/month=…/day=…/hour=…"]
+
+  N --> O["Glue Catalog + Athena (GLUE_DB)"]
+  O --> P["S3 PROCESSED Bucket (Parquet)\nprocessed/ partitioned: plantId/year/month/day/machineId"]
+
+  I --> Q["Realtime Dashboards / APIs"]
+  L --> Q
+  O --> R["Historical Analytics (Athena/BI)"]
+

@@ -1,0 +1,210 @@
+queries:
+
+Real-time (DynamoDB)
+Per machine, last 15 minutes
+
+
+from boto3.dynamodb.conditions import Key
+import boto3, time
+
+table = boto3.resource('dynamodb').Table('cnc-realtime-data')
+plant_id, machine_id = 'ka', 'machine-123'
+end_ms = int(time.time()*1000)
+start_ms = end_ms - 15*60*1000
+
+resp = table.query(
+  KeyConditionExpression=Key('plantMachineId').eq(f'{plant_id}#{machine_id}') &
+                         Key('timestamp').between(start_ms, end_ms),
+  ScanIndexForward=False  # latest first
+)
+items = resp['Items']
+
+
+Plant-wide, last 5 minutes (bucketed GSI)
+
+from boto3.dynamodb.conditions import Key
+import boto3, time
+
+table = boto3.resource('dynamodb').Table('cnc-realtime-data')
+plant_id, num_buckets = 'ka', 8
+end_ms = int(time.time()*1000)
+start_ms = end_ms - 5*60*1000
+
+items = []
+for b in range(num_buckets):
+  resp = table.query(
+    IndexName='PlantBucketTimestampIndex',
+    KeyConditionExpression=Key('plantBucket').eq(f'{plant_id}#{b}') &
+                           Key('timestamp').between(start_ms, end_ms)
+  )
+  items.extend(resp['Items'])
+
+
+
+Latest per machine (fast tiles) for a plant
+
+  from boto3.dynamodb.conditions import Key
+  import boto3
+
+  table = boto3.resource('dynamodb').Table('cnc-latest')
+  plant_id = 'ka'
+  resp = table.query(
+    IndexName='PlantIndex',
+    KeyConditionExpression=Key('plantId').eq(plant_id)
+  )
+  machines = resp['Items']  # one latest row per machine
+
+
+Latest for one machine (two options)
+
+  # Option A: read from cnc-latest
+latest = boto3.resource('dynamodb').Table('cnc-latest').get_item(
+  Key={'plantMachineId': f'{plant_id}#{machine_id}'}
+).get('Item')
+
+# Option B: query hot table with Limit=1 (if cnc-latest isn’t used)
+resp = table.query(
+  KeyConditionExpression=Key('plantMachineId').eq(f'{plant_id}#{machine_id}'),
+  ScanIndexForward=False, Limit=1
+)
+latest = resp['Items'][0] if resp['Items'] else None
+
+
+
+
+
+Time windows in IST: compute IST window, convert to UTC ms for DynamoDB
+
+
+from datetime import datetime, timezone, timedelta
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def ist_range_to_utc_ms(ist_start_str, ist_end_str):
+  s = datetime.fromisoformat(ist_start_str).replace(tzinfo=IST).astimezone(timezone.utc)
+  e = datetime.fromisoformat(ist_end_str).replace(tzinfo=IST).astimezone(timezone.utc)
+  return int(s.timestamp()*1000), int(e.timestamp()*1000)
+
+start_ms, end_ms = ist_range_to_utc_ms('2025-08-29T10:00:00', '2025-08-29T12:59:59')
+
+
+
+
+
+Historical (Athena over S3 Processed)
+Assume a Parquet table with time partitions:
+Location: s3://<processed-bucket>/processed/
+Partitions: plantId, year, month, day, hour
+Columns: receivedAt_utc (timestamp), kw, kvar, kva, powerFactor, utilization, machineId, packetId, slaveId, slaveName
+DDL (create once)
+
+
+
+
+CREATE DATABASE IF NOT EXISTS cnc_prod;
+
+CREATE EXTERNAL TABLE IF NOT EXISTS cnc_prod.processed_power (
+  machineId string,
+  receivedAt_utc timestamp,
+  kw double, kvar double, kva double,
+  powerFactor double, utilization int,
+  packetId string, slaveId int, slaveName string
+)
+PARTITIONED BY (
+  plantId string,
+  year string, month string, day string, hour string
+)
+STORED AS PARQUET
+LOCATION 's3://<processed-bucket>/processed/'
+TBLPROPERTIES ('parquet.compress'='GZIP');
+
+
+
+If you add new partitions, run
+
+MSCK REPAIR TABLE cnc_prod.processed_power;
+
+
+
+
+Plant, specific hours of a day (UTC partitions)
+SELECT *
+FROM cnc_prod.processed_power
+WHERE plantId='ka'
+  AND year='2025' AND month='08' AND day='29'
+  AND hour IN ('10','11','12')
+  AND receivedAt_utc BETWEEN TIMESTAMP '2025-08-29 10:00:00+00:00'
+                         AND TIMESTAMP '2025-08-29 12:59:59+00:00';
+
+
+
+Queries with partition projections
+
+CREATE EXTERNAL TABLE IF NOT EXISTS cnc_monitoring_dev.raw_cnc_json (
+  packetId bigint,
+  macId string,
+  slaveName string,
+  slaveId int,
+  kw double,
+  kvar double,
+  kva double,
+  plantId string,
+  machineId string,
+  receivedAt bigint
+)
+PARTITIONED BY (year string, month string, day string, hour string)
+ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
+LOCATION 's3://cnc-monitoring-raw-data-dev-272103761927/raw-data/'
+TBLPROPERTIES (
+  'projection.enabled'='true',
+  'projection.year.type'='integer',
+  'projection.year.range'='2020,2050',
+  'projection.month.type'='integer',
+  'projection.month.range'='1,12',
+  'projection.month.digits'='2',
+  'projection.day.type'='integer',
+  'projection.day.range'='1,31',
+  'projection.day.digits'='2',
+  'projection.hour.type'='integer',
+  'projection.hour.range'='0,23',
+  'projection.hour.digits'='2',
+  'storage.location.template'='s3://cnc-monitoring-raw-data-dev-272103761927/raw-data/year=${year}/month=${month}/day=${day}/hour=${hour}/'
+);
+
+
+
+CREATE EXTERNAL TABLE IF NOT EXISTS cnc_monitoring_dev.processed_power (
+  macId string,
+  slaveName string,
+  slaveId int,
+  kw double,
+  kvar double,
+  kva double,
+  receivedAt_utc timestamp
+)
+PARTITIONED BY (
+  plantId string,
+  year string,
+  month string,
+  day string,
+  machineId string
+)
+STORED AS PARQUET
+LOCATION 's3://cnc-monitoring-processed-data-dev-272103761927/processed/'
+TBLPROPERTIES (
+  'projection.enabled'='true',
+  'projection.plantId.type'='injected',
+  'projection.machineId.type'='injected',
+  'projection.year.type'='integer',
+  'projection.year.range'='2020,2050',
+  'projection.month.type'='integer',
+  'projection.month.range'='1,12',
+  'projection.month.digits'='2',
+  'projection.day.type'='integer',
+  'projection.day.range'='1,31',
+  'projection.day.digits'='2',
+  'storage.location.template'='s3://cnc-monitoring-processed-data-dev-272103761927/processed/plantId=${plantId}/year=${year}/month=${month}/day=${day}/machineId=${machineId}/'
+);
+
+
+Chat ID:
+0d2051a1-0c4d-4031-b251-509ee8877f4d

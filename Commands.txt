@@ -1,0 +1,1 @@
+aws s3api get-object --bucket cnc-monitoring-raw-data-dev-272103761927 --key raw-data/year=2025/month=08/day=30/hour=11/cnc-monitoring-firehose-dev-1-2025-08-30-11-17-14-5baf3bad-2032-4f39-8ef5-44e68329b59e.gz /dev/stdout | zcat

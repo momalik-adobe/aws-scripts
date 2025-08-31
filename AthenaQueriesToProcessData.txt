@@ -1,0 +1,121 @@
+-- 0) Raw JSON table (run once if not already created)
+CREATE EXTERNAL TABLE IF NOT EXISTS machine_monitoring_dev.raw_machine_json (
+  packetId bigint,
+  macId string,
+  slaveName string,
+  slaveId int,
+  kw double,
+  kvar double,
+  kva double,
+  plantId string,
+  machineId string,
+  receivedAt bigint
+)
+PARTITIONED BY (year string, month string, day string, hour string)
+ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
+LOCATION 's3://machine_monitoring_dev/raw-data/';
+
+-- 1) Load partitions for raw
+MSCK REPAIR TABLE machine_monitoring_dev.raw_machine_json;
+
+-- 2) Create processed Parquet table (run once)
+CREATE TABLE machine_monitoring_dev.processed_power
+WITH (
+  format = 'PARQUET',
+  parquet_compression = 'GZIP',
+  external_location = 's3://machine-monitoring-processed-data-dev-272103761927/processed/',
+  partitioned_by = ARRAY['plantId','year','month','day','machineId']
+) AS
+SELECT
+  CAST(plantId AS varchar)      AS plantId,
+  CAST(machineId AS varchar)    AS machineId,
+  CAST(macId AS varchar)        AS macId,
+  CAST(slaveName AS varchar)    AS slaveName,
+  CAST(slaveId AS integer)      AS slaveId,
+  CAST(kw AS double)            AS kw,
+  CAST(kvar AS double)          AS kvar,
+  CAST(kva AS double)           AS kva,
+  from_unixtime(CAST(receivedAt AS bigint)/1000) AS receivedAt_utc,
+  year, month, day
+FROM machine_monitoring_dev.raw_machine_json;
+
+
+
+
+Queries with partition projections
+
+CREATE EXTERNAL TABLE IF NOT EXISTS machine_monitoring_dev.raw_machine_json (
+  packetId bigint,
+  macId string,
+  slaveName string,
+  slaveId int,
+  kw double,
+  kvar double,
+  kva double,
+  plantId string,
+  machineId string,
+  receivedAt bigint
+)
+PARTITIONED BY (year string, month string, day string, hour string)
+ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
+LOCATION 's3://machine-monitoring-raw-data-dev-272103761927/raw-data/'
+TBLPROPERTIES (
+  'projection.enabled'='true',
+  'projection.year.type'='integer',
+  'projection.year.range'='2020,2050',
+  'projection.month.type'='integer',
+  'projection.month.range'='1,12',
+  'projection.month.digits'='2',
+  'projection.day.type'='integer',
+  'projection.day.range'='1,31',
+  'projection.day.digits'='2',
+  'projection.hour.type'='integer',
+  'projection.hour.range'='0,23',
+  'projection.hour.digits'='2',
+  'storage.location.template'='s3://machine-monitoring-raw-data-dev-272103761927/raw-data/year=${year}/month=${month}/day=${day}/hour=${hour}/'
+);
+
+
+
+
+
+CREATE EXTERNAL TABLE machine_monitoring_dev.processed_power (
+  macId string,
+  slaveName string,
+  slaveId int,
+  kw double,
+  kvar double,
+  kva double,
+  receivedAt_utc timestamp
+)
+PARTITIONED BY (
+  plantId string,
+  year string,
+  month string,
+  day string,
+  machineId string
+)
+STORED AS PARQUET
+LOCATION 's3://machine-monitoring-processed-data-dev-272103761927/processed/';
+
+
+
+INSERT INTO machine_monitoring_dev.processed_power
+SELECT
+  CAST(macId AS varchar)                    AS macId,
+  CAST(slaveName AS varchar)                AS slaveName,
+  CAST(slaveId AS integer)                  AS slaveId,
+  CAST(kw AS double)                        AS kw,
+  CAST(kvar AS double)                      AS kvar,
+  CAST(kva AS double)                       AS kva,
+  from_unixtime(CAST(receivedAt AS bigint)/1000) AS receivedAt_utc,
+  CAST(plantId AS varchar)                  AS plantId,      -- partition cols start here
+  date_format(date_add('hour', -1, current_timestamp), '%Y') AS year,
+  date_format(date_add('hour', -1, current_timestamp), '%m') AS month,
+  date_format(date_add('hour', -1, current_timestamp), '%d') AS day,
+  CAST(machineId AS varchar)                AS machineId
+FROM machine_monitoring_dev.raw_machine_json
+WHERE year  = date_format(date_add('hour', -1, current_timestamp), '%Y')
+  AND month = date_format(date_add('hour', -1, current_timestamp), '%m')
+  AND day   = date_format(date_add('hour', -1, current_timestamp), '%d')
+  AND hour  = date_format(date_add('hour', -1, current_timestamp), '%H');
