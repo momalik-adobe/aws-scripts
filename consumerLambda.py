@@ -7,13 +7,14 @@ from datetime import datetime, timedelta
 import boto3
 from decimal import Decimal
 
-dynamodb = boto3.resource("dynamodb")
+# DynamoDB resource/table
+_dynamodb = boto3.resource("dynamodb")
 
 HOT_TABLE = os.environ["HOT_TABLE"]
 NUM_BUCKETS = int(os.environ.get("PLANT_BUCKETS", "8"))
 TTL_HOURS = int(os.environ.get("TTL_HOURS", "48"))
 
-hot_table = dynamodb.Table(HOT_TABLE)
+hot_table = _dynamodb.Table(HOT_TABLE)
 
 
 def _to_decimal(value):
@@ -30,8 +31,7 @@ def _to_decimal(value):
 def lambda_handler(event, context):
     """
     Triggered by Kinesis Data Streams.
-    Expects Kinesis records containing the enriched JSON produced by the enrichment Lambda.
-    Writes time-series rows into DynamoDB hot table with TTL and plant-bucket GSI key.
+    Skips records where required numeric fields are missing or non-numeric.
     """
     ttl_epoch = int((datetime.utcnow() + timedelta(hours=TTL_HOURS)).timestamp())
 
@@ -48,7 +48,15 @@ def lambda_handler(event, context):
             received_at = payload.get("receivedAt")
             ts = int(received_at) if received_at is not None else int(time.time() * 1000)
 
-            # Precompute strings to avoid f-string expression issues
+            # Numeric validations: require kw to be present and numeric; optional others
+            kw_dec = _to_decimal(payload.get("kw"))
+            if kw_dec is None:
+                # Skip packets without a valid kw value
+                continue
+            kvar_dec = _to_decimal(payload.get("kvar"))
+            kva_dec = _to_decimal(payload.get("kva"))
+           
+
             plant_machine = f"{plant_id}#{machine_id}"
             machine_bytes = machine_id.encode("utf-8")
             bucket_num = zlib.crc32(machine_bytes) % NUM_BUCKETS
@@ -60,11 +68,9 @@ def lambda_handler(event, context):
                 "plantId": plant_id,
                 "machineId": machine_id,
                 "macId": payload.get("macId"),
-                "kw": _to_decimal(payload.get("kw")),
-                "kvar": _to_decimal(payload.get("kvar")),
-                "kva": _to_decimal(payload.get("kva")),
-                "powerFactor": _to_decimal(payload.get("powerFactor")),
-                "utilization": _to_decimal(payload.get("utilization")),
+                "kw": kw_dec,
+                "kvar": kvar_dec,
+                "kva": kva_dec,
                 "packetId": payload.get("packetId"),
                 "slaveId": payload.get("slaveId"),
                 "slaveName": payload.get("slaveName"),

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefailen
+set -euo pipefail
 
 # Usage: ./10_onboard_things.sh <plantId> <count> [--thing-prefix <prefix>] [--group <groupName>] [--policy <policyName>]
 # Requires: AWS CLI v2, jq, curl

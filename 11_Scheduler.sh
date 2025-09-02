@@ -94,16 +94,19 @@ SELECT
   CAST(r.macId AS varchar)                AS macId,
   CAST(r.slaveName AS varchar)            AS slaveName,
   CAST(r.slaveId AS integer)              AS slaveId,
-  CAST(r.kw AS double)                    AS kw,
-  CAST(r.kvar AS double)                  AS kvar,
-  CAST(r.kva AS double)                   AS kva,
+  try_cast(r.kw AS double)                AS kw,
+  try_cast(r.kvar AS double)              AS kvar,
+  try_cast(r.kva AS double)               AS kva,
   from_unixtime(CAST(r.receivedAt AS bigint)/1000) AS receivedAt_utc,
   CAST(r.plantId AS varchar)              AS plantId,
   date_format(r.ts_ist, '%Y')             AS year,
   date_format(r.ts_ist, '%m')             AS month,
   date_format(r.ts_ist, '%d')             AS day,
   CAST(r.machineId AS varchar)            AS machineId
-FROM raw_ist r;
+FROM raw_ist r
+WHERE try_cast(r.kw AS double) IS NOT NULL
+  AND (r.kva IS NULL OR try_cast(r.kva AS double) IS NOT NULL)
+  AND (r.kvar IS NULL OR try_cast(r.kvar AS double) IS NOT NULL);
 SQL
 )
 
