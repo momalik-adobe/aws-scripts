@@ -74,29 +74,36 @@ aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name ${ROLE_NAME}-athe
 # Athena SQL (IST-partitioned)
 QUERY=$(cat <<'SQL'
 INSERT INTO machine_monitoring_dev.processed_power
-WITH t AS (
-  SELECT macId, slaveName, slaveId, kw, kvar, kva, plantId, machineId, receivedAt,
-         (from_unixtime(CAST(receivedAt AS bigint)/1000) AT TIME ZONE 'Asia/Kolkata') AS ts_ist
-  FROM machine_monitoring_dev.raw_machine_json
-  WHERE year  = date_format(date_add('hour', -1, current_timestamp), '%Y')
-    AND month = date_format(date_add('hour', -1, current_timestamp), '%m')
-    AND day   = date_format(date_add('hour', -1, current_timestamp), '%d')
-    AND hour  = date_format(date_add('hour', -1, current_timestamp), '%H')
+WITH last AS (
+  SELECT
+    date_format(date_add('hour', -1, current_timestamp), '%Y') AS y,
+    date_format(date_add('hour', -1, current_timestamp), '%m') AS m,
+    date_format(date_add('hour', -1, current_timestamp), '%d') AS d,
+    date_format(date_add('hour', -1, current_timestamp), '%H') AS h
+),
+raw_ist AS (
+  SELECT r.*,
+         (from_unixtime(CAST(r.receivedAt AS bigint)/1000) AT TIME ZONE 'Asia/Kolkata') AS ts_ist
+  FROM machine_monitoring_dev.raw_machine_json r, last
+  WHERE r.year  = last.y
+    AND r.month = last.m
+    AND r.day   = last.d
+    AND r.hour  = last.h
 )
 SELECT
-  CAST(macId AS varchar) AS macId,
-  CAST(slaveName AS varchar) AS slaveName,
-  CAST(slaveId AS integer) AS slaveId,
-  CAST(kw AS double) AS kw,
-  CAST(kvar AS double) AS kvar,
-  CAST(kva AS double) AS kva,
-  from_unixtime(CAST(receivedAt AS bigint)/1000) AS receivedAt_utc,
-  CAST(plantId AS varchar) AS plantId,
-  date_format(ts_ist, '%Y') AS year,
-  date_format(ts_ist, '%m') AS month,
-  date_format(ts_ist, '%d') AS day,
-  CAST(machineId AS varchar) AS machineId
-FROM t;
+  CAST(r.macId AS varchar)                AS macId,
+  CAST(r.slaveName AS varchar)            AS slaveName,
+  CAST(r.slaveId AS integer)              AS slaveId,
+  CAST(r.kw AS double)                    AS kw,
+  CAST(r.kvar AS double)                  AS kvar,
+  CAST(r.kva AS double)                   AS kva,
+  from_unixtime(CAST(r.receivedAt AS bigint)/1000) AS receivedAt_utc,
+  CAST(r.plantId AS varchar)              AS plantId,
+  date_format(r.ts_ist, '%Y')             AS year,
+  date_format(r.ts_ist, '%m')             AS month,
+  date_format(r.ts_ist, '%d')             AS day,
+  CAST(r.machineId AS varchar)            AS machineId
+FROM raw_ist r;
 SQL
 )
 
