@@ -83,7 +83,7 @@ WITH last AS (
 ),
 raw_ist AS (
   SELECT r.*,
-         (from_unixtime(CAST(r.receivedAt AS bigint)/1000) AT TIME ZONE 'Asia/Kolkata') AS ts_ist
+        from_unixtime(CAST(r.receivedAt AS bigint)/1000 + 19800) AS ts_ist
   FROM machine_monitoring_dev.raw_machine_json r, last
   WHERE r.year  = last.y
     AND r.month = last.m
@@ -98,6 +98,7 @@ SELECT
   try_cast(r.kvar AS double)              AS kvar,
   try_cast(r.kva AS double)               AS kva,
   from_unixtime(CAST(r.receivedAt AS bigint)/1000) AS receivedAt_utc,
+  r.ts_ist                                AS receivedAt_ist,
   CAST(r.plantId AS varchar)              AS plantId,
   date_format(r.ts_ist, '%Y')             AS year,
   date_format(r.ts_ist, '%m')             AS month,

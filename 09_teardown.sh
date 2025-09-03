@@ -14,7 +14,8 @@ for FN in "${CONSUMER_FN}" "${LATEST_FN}" "${ENRICH_FN}"; do
   done
 done
 
-for FN in "${ENRICH_FN}" "${CONSUMER_FN}" "${LATEST_FN}"; do
+TRANSFORM_FN="${PROJECT}-firehose-transform-${ENV}"
+for FN in "${ENRICH_FN}" "${CONSUMER_FN}" "${LATEST_FN}" "${TRANSFORM_FN}"; do
   aws lambda delete-function --function-name "${FN}" --region "${AWS_REGION}" >/dev/null 2>&1 || true
   aws logs delete-log-group --log-group-name "/aws/lambda/${FN}" --region "${AWS_REGION}" >/dev/null 2>&1 || true
 done
