@@ -22,6 +22,7 @@ export FIREHOSE="${PROJECT}-firehose-${ENV}"
 export DDB_REG="${PROJECT}-device-registry-${ENV}"
 export DDB_HOT="${PROJECT}-realtime-data-${ENV}"
 export DDB_LATEST="${PROJECT}-latest-${ENV}"
+export DDB_PARTS="${PROJECT}-part-specifications-${ENV}"
 
 export GLUE_DB="${PROJECT_SAFE}_${ENV_SAFE}"
 

@@ -7,10 +7,10 @@ exists() { aws dynamodb describe-table --table-name "$1" --region "${AWS_REGION}
 # Registry
 if ! exists "${DDB_REG}"; then
   aws dynamodb create-table --table-name "${DDB_REG}" \
-    --attribute-definitions AttributeName=machineId,AttributeType=S AttributeName=plantId,AttributeType=S \
-    --key-schema AttributeName=machineId,KeyType=HASH \
+    --attribute-definitions AttributeName=plantId,AttributeType=S AttributeName=machineId,AttributeType=S \
+    --key-schema AttributeName=plantId,KeyType=HASH AttributeName=machineId,KeyType=RANGE \
     --billing-mode PAY_PER_REQUEST \
-    --global-secondary-indexes '[{"IndexName":"PlantDevicesIndex","KeySchema":[{"AttributeName":"plantId","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]' \
+    --global-secondary-indexes '[{"IndexName":"MachineIdIndex","KeySchema":[{"AttributeName":"machineId","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]' \
     --region "${AWS_REGION}"
 fi
 aws dynamodb wait table-exists --table-name "${DDB_REG}" --region "${AWS_REGION}"
@@ -41,4 +41,16 @@ if ! exists "${DDB_LATEST}"; then
     --region "${AWS_REGION}"
 fi
 aws dynamodb wait table-exists --table-name "${DDB_LATEST}" --region "${AWS_REGION}"
-echo "DynamoDB ready: ${DDB_REG}, ${DDB_HOT}, ${DDB_LATEST}"
+
+# Part specifications
+DDB_PARTS="${PROJECT}-part-specifications-${ENV}"
+if ! exists "${DDB_PARTS}"; then
+  aws dynamodb create-table --table-name "${DDB_PARTS}" \
+    --attribute-definitions AttributeName=partName,AttributeType=S AttributeName=plantId,AttributeType=S \
+    --key-schema AttributeName=partName,KeyType=HASH AttributeName=plantId,KeyType=RANGE \
+    --billing-mode PAY_PER_REQUEST \
+    --region "${AWS_REGION}"
+fi
+aws dynamodb wait table-exists --table-name "${DDB_PARTS}" --region "${AWS_REGION}"
+
+echo "DynamoDB ready: ${DDB_REG}, ${DDB_HOT}, ${DDB_LATEST}, ${DDB_PARTS}"
